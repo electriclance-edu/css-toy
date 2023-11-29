@@ -7,6 +7,7 @@ body {
   width:100%;
   height:100%;
   overflow:hidden;
+  font-size:2vh;
 }
 p {
   font-family:'Open Sans', sans-serif;
@@ -14,19 +15,23 @@ p {
 }
 .ViewInfo {
   position:absolute;
-  left:20px;
-  top:20px;
+  left:1vw;
+  top:1vw;
   z-index:1000;
+  pointer-events:none;
+  user-select:none;
 }
 .ViewTypeTitle {
   font-weight:bold;
 }
 .TileInfo {
   position:absolute;
-  right:20px;
-  top:20px;
+  right:1vw;
+  top:1vw;
   text-align:right;
   z-index:1000;
+  pointer-events:none;
+  user-select:none;
 }
 .TileColonyName {
   font-weight:bold;
@@ -40,4 +45,40 @@ p {
   transform:translate(-50%,-50%);
   height:100%;
   image-rendering:pixelated;
+}
+.Brushes {
+  bottom:1vw;
+  left:1vw;
+  display:flex;
+  z-index:1000;
+  position: absolute;
+}
+.Brushes > div {
+  width:6vh;
+  height:6vh;
+  margin:0 0.5vw;
+  border-radius:10000px;
+  box-sizing:border-box;
+}
+.Brushes > div:hover {
+  transform:scale(1.2);
+}
+.Brushes > div:active {
+  transform:scale(1);
+}
+.airBrush {
+  border:1vh solid black;
+  background-color:white;
+}
+.wallBrush {
+  background-color:black;
+}
+.virusBrush {
+  background-color:red;
+}
+.foodBrush {
+  background-color:rgb(20, 230, 142);
+}
+.greatfoodBrush {
+  background-color:rgb(4, 243, 63);
 }

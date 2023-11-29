@@ -7,21 +7,32 @@
     <script src="script.js"></script>
   </head>
   <body onload="onload()">
-    <div class="ViewInfo">
-      <p class="ViewTypeTitle" id="ViewTypeTitle">normal view</p>
-      <p class="ViewTypeDescription" id="ViewTypeDescription">colors are based on the genomic true and accent color</p>
-    </div>
-    <div class="TileInfo">
-      <p class="TileColonyName" id="TileColonyName"></p>
-      <p class="TileType" id="TileType"></p>
-      <p class="TileNutrition" id="TileNutrition"></p>
-      <p class="TileKills" id="TileKills"></p>
-      <p class="TileColonyGeneration" id="TileColonyGeneration"></p>
-      <p class="TileColonyColor" id="TileColonyColor"></p>
-      <p class="TileColonyDisposition" id="TileColonyDisposition"></p>
-      <p class="TileColonyInherentNumber" id="TileColonyInherentNumber"></p>
-      <p class="TileColonyAccentColor" id="TileColonyAccentColor"></p>
-      <p id="GenerationalBrightnessModifier"></p>
+    <div class="Overlay" id="Overlay" style="display:block">
+      <div class="ViewInfo">
+        <p class="ViewTypeTitle" id="ViewTypeTitle">normal view</p>
+        <p class="ViewTypeDescription" id="ViewTypeDescription">colors are based on the genomic true and accent color</p>
+      </div>
+      <div class="TileInfo" id="TileInfo">
+        <p class="TileColonyName" id="TileColonyName"></p>
+        <p class="TileType" id="TileType"></p>
+        <p class="TileNutrition" id="TileNutrition"></p>
+        <p class="TileSedentaryDesire" id="TileSedentaryDesire"></p>
+        <p class="TileKills" id="TileKills"></p>
+        <p class="TileColonyGeneration" id="TileColonyGeneration"></p>
+        <p class="TileColonyColor" id="TileColonyColor"></p>
+        <p class="TileColonyDisposition" id="TileColonyDisposition"></p>
+        <p class="TileColonyInherentNumber" id="TileColonyInherentNumber"></p>
+        <p class="TileColonyAccentColor" id="TileColonyAccentColor"></p>
+        <p id="GenerationalBrightnessModifier"></p>
+      </div>
+      <div class="Brushes">
+        <div class="airBrush" onclick="setBrush('air')"></div>
+        <div class="wallBrush" onclick="setBrush('wall')"></div>
+        <div class="virusBrush" onclick="setBrush('virus')"></div>
+        <div class="foodBrush" onclick="setBrush('food')"></div>
+        <div class="greatfoodBrush" onclick="setBrush('greatfood')"></div>
+        <p id="brushSize">3</p>
+      </div>
     </div>
     <canvas class="canvas" id="canvas"></canvas>
   </body>

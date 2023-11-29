@@ -1,18 +1,21 @@
 //graphics settings
-var tilePx = 10;
+var tilePx = 5;
 var viewType = 1;
 const phenotypeColorVariance = 5;
 const accentColorStrength = 10;
 let viewRenderFunction;
+let hideOverlay = false;
 //data
 var tileColors = {
   red:"rgb(245,135,115)",
   lblue:"rgb(115,205,215)",
   dblue:"rgb(115,205,250)",
-  orange:"rgb(250,190,115)"
+  orange:"rgb(250,190,115)",
+  food:"rgb(20, 230, 142)"
 } 
 //world state
 var time = 0;
+var paused = false;
 //canvas
 var canvas, ctx, screenX, screenY;
 //mouse state
@@ -21,33 +24,43 @@ var mouseButton = -1;
 var mouseColor = "rgb(0,0,0)";
 var colorPicked = false;
 var currentMouseTile = {x:0,y:0};
+var brushType = "virus";
+var brushSize = 3;
 //keyb state
 var ctrlPressed = false;
 //virus data
 const dispositionSyllables = {
   kind:"atraci",
-  round:"sphera",
-  deadly:"coli",
-  dangerous:"letalis",
-  old:"archai",
-  magical:"arcani",
-  parasitic:"vermici",
-  bungus:"amogi",
+  // round:"sphera",
+  // deadly:"coli",
+  // dangerous:"letalis",
+  // old:"archai",
+  // magical:"arcani",
+  // parasitic:"vermici",
+  // bungus:"amogi",
   primal:"primoris"
 }
 //sim settings
-const fullNutritionLevel = 5;
-const startingNutrition = 10000; //10,000
-const baseSpreadChance = 50;
-const baseAttackChance = 1;
-const baseDiffusionChance = 20;
-const baseMutationChance = 0.0002;
-const mutationVariance = 100;
-const nutritionMutationThreshold = 1000000; //0.1;
-const newMutationColonyRandBonusMax = 500; //500
-const baseExplosionChance = 1;
-const baseAdjacencyDebuffStrength = 0.01; //1;
-const blastNutrition = 500;
+var fullNutritionLevel = 5;
+var productiveNutritionLevelHigh = 500;
+var productiveNutritionLevelLow = 1;
+var startingNutrition = 100; //10,000
+var baseSpreadChance = 10;
+var baseAttackChance = 5;
+var baseProductionChance = 0.001;
+var baseDiffusionChance = 20;
+var baseExplosionChance = 1;
+var baseMutationChance = 0.0000002;
+var baseEatingChance = 0.5;
+var mutationVariance = 100;
+var nutritionMutationThreshold = 1000000; //0.1;
+var newMutationColonyRandBonusMax = 500; //500
+var baseAdjacencyDebuffStrength = 0.01; //1;
+var blastNutrition = 10000;//500;
+var productionNutrition = 1500;
+var foodNutrition = 100;
+var greatfoodNutrition = 10000;
+var nutritionDecayMultiplier = 0.999;
 const colorMinimum = 100;
 const colorMaximum = 230;
 
@@ -69,6 +82,15 @@ class Tile {
     }
     Tile.tileRows[y][x] = tile;
   }
+  static remove(x,y) {
+    if (!Tile.tileRows.hasOwnProperty(y)) {
+      return false;
+    }
+    if (!Tile.tileRows[y].hasOwnProperty(x)) {
+      return false;
+    }
+    delete Tile.tileRows[y][x];
+  }
   static get(x,y,debug=false) {
     if (!Tile.tileRows.hasOwnProperty(y)) {
       return undefined;
@@ -86,7 +108,11 @@ class Tile {
     if (!tile) {
       return false;
     } 
-    return tile.type == "food";
+    return tile.type == "food" || tile.type == "greatfood";
+  }
+  virusIsProductive() {
+    if (this.data.genome.disposition == "primal") return this.nutrition < productiveNutritionLevelLow;
+    return (this.nutrition > productiveNutritionLevelLow) && (this.nutrition < productiveNutritionLevelHigh)
   }
   virusCanInfect(x,y) {
     let tile = Tile.get(x,y);
@@ -180,12 +206,12 @@ class Tile {
     rgb.b = clamp(colorMinimum,rgb.b + (randInt(30) * randSign()),colorMaximum);
     return `rgb(${rgb.r},${rgb.g},${rgb.b})`;
   }
-  static virusGeneratePhenotypicColor(str,acc,generation) {
+  static virusGeneratePhenotypicColor(str,acc,generation,inherentNumber) {
     let rgb = rgbStringToObj(str);
     rgb.r = clamp(colorMinimum,rgb.r + (randInt(phenotypeColorVariance) * randSign() + 20),colorMaximum);
     rgb.g = clamp(colorMinimum,rgb.g + (randInt(phenotypeColorVariance) * randSign()),colorMaximum);
     rgb.b = clamp(colorMinimum,rgb.b + (randInt(phenotypeColorVariance) * randSign()),colorMaximum);
-    rgb[acc] = clamp(colorMinimum,rgb.b + accentColorStrength * (cycleNumber(generation,7)),colorMaximum);
+    rgb[acc] = clamp(colorMinimum,rgb.b + accentColorStrength * (cycleNumber(generation,inherentNumber % 5 * 5 + 1)),colorMaximum);
     return `rgb(${rgb.r},${rgb.g},${rgb.b})`;
   }
   static generateVirusData(generation = 0,color = "newColor",accentColor = "newColor",inherentNumber = randInt(100000),disposition = randElem(Object.keys(dispositionSyllables)),nutrition = 0.01,bloodiness = 0) {
@@ -195,10 +221,11 @@ class Tile {
       accentColor = randElem(["r","g","b"]);
     }
     return {
-      phenotypicColor:Tile.virusGeneratePhenotypicColor(setColor,accentColor,generation),
+      phenotypicColor:Tile.virusGeneratePhenotypicColor(setColor,accentColor,generation,inherentNumber),
       nutrition:nutrition,
       generation:generation,
       bloodiness:bloodiness,
+      sedentaryDesire:0.5,
       genome:{
         color:setColor,
         accentColor:accentColor,
@@ -231,7 +258,7 @@ class Tile {
     let friendlies = [];
     let adjacents = this.adjacents;
     adjacents.forEach((adj)=>{
-      if (adj.color == this.color) friendlies.push(adj);
+      if (adj.trueColor == this.trueColor) friendlies.push(adj);
     });
     return friendlies;
   }
@@ -240,11 +267,11 @@ class Tile {
       [0,-1],
       [0,1],
       [-1,0],
-      [1,0],
       [1,1],
       [1,-1],
       [-1,1],
       [-1,-1],
+      [1,0],
     ]
     let adj = [];
     transformations.forEach((t)=>{
@@ -322,6 +349,12 @@ document.addEventListener("mousedown",(e)=>{
     colorPicked = false;
   }
 });
+document.addEventListener("wheel",(e)=>{
+  if (e.deltaY <= 0) brushSize++;
+  else brushSize = Math.max(--brushSize,1);
+
+  document.getElementById("brushSize").innerHTML = brushSize;
+});
 document.addEventListener("mouseup",(e)=>{
   mouseDown = false;
   mouseButton = -1;
@@ -337,27 +370,58 @@ document.addEventListener("mousemove",(e)=>{
   if (!mouseDown) {
     return;
   }
-
   if (mouseButton == 0) {
+    return;
+  }
+
+  if (brushType == "wall") {
     if (ctrlPressed) return;
-    Tile.set(new Tile("wall",{colorType:"lblue"}),worldCoords.x,worldCoords.y);
-    Tile.set(new Tile("wall",{colorType:"lblue"}),worldCoords.x + 1,worldCoords.y);
-    Tile.set(new Tile("wall",{colorType:"lblue"}),worldCoords.x - 1,worldCoords.y);
-    Tile.set(new Tile("wall",{colorType:"lblue"}),worldCoords.x,worldCoords.y + 1);
-    Tile.set(new Tile("wall",{colorType:"lblue"}),worldCoords.x,worldCoords.y - 1);
-  } else if (mouseButton == 2) {
+    let toFill = circleIntCoords(worldCoords.x,worldCoords.y,brushSize);
+    toFill.forEach((coord)=>{
+      Tile.set(new Tile("wall",{colorType:"lblue"}),coord.x,coord.y);
+    });
+  } else if (brushType == "virus") {
     Tile.set(new Tile("virus",Tile.generateVirusData(0,mouseColor,mouseAccentColor,mouseInherentNumber,mouseDisposition,startingNutrition)),worldCoords.x,worldCoords.y);
+  } else if (brushType == "air") {
+    let toDelete = circleIntCoords(worldCoords.x,worldCoords.y,brushSize);
+    toDelete.forEach((coord)=>{
+      Tile.remove(coord.x,coord.y);
+    });
+  } else if (brushType == "food") {
+    let toFill = circleIntCoords(worldCoords.x,worldCoords.y,brushSize);
+    toFill.forEach((coord)=>{
+      Tile.set(new Tile("food",{colorType:"food"}),coord.x,coord.y);
+    });
+  } else if (brushType == "greatfood") {
+    let toFill = circleIntCoords(worldCoords.x,worldCoords.y,brushSize);
+    toFill.forEach((coord)=>{
+      Tile.set(new Tile("greatfood",{colorType:"greatfood"}),coord.x,coord.y);
+    });
   }
   // setPixel(worldCoords.x,worldCoords.y,"blue");
 });
+function setBrush(brush) {
+  brushType = brush;
+}
 document.addEventListener("keydown",(e)=>{
   let key = e.key;
 
-  if (key == "1") setViewType(1);
+  if (key == "0") setViewType(0);
+  else if (key == "1") setViewType(1);
   else if (key == "2") setViewType(2);
   else if (key == "3") setViewType(3);
   else if (key == "4") setViewType(4);
+  if (e.code == "Space") paused = !paused;
   if (key == "Control") ctrlPressed = true;
+  if (key == "Shift") {
+    hideOverlay = !hideOverlay;
+
+    if (hideOverlay) {
+      document.getElementById("Overlay").style.display = "none";
+    } else {
+      document.getElementById("Overlay").style.display = "block";
+    }
+  }
 });
 document.addEventListener("keyup",(e)=>{
   let key = e.key;
@@ -366,6 +430,10 @@ document.addEventListener("keyup",(e)=>{
 });
 function setViewType(index) {
   const viewLores = [
+    {
+      title:"experimental view",
+      desc:"debug view for testing changes to the normal rendering"
+    },
     {
       title:"normal view",
       desc:"colors are based on the genomic true and accent color"
@@ -384,37 +452,67 @@ function setViewType(index) {
     },
   ]
   viewType = index;
-  document.getElementById("ViewTypeTitle").innerHTML = viewLores[index - 1].title;
-  document.getElementById("ViewTypeDescription").innerHTML = viewLores[index - 1].desc;
+  document.getElementById("ViewTypeTitle").innerHTML = viewLores[index].title;
+  document.getElementById("ViewTypeDescription").innerHTML = viewLores[index].desc;
 
-  if (viewType == 1) {
+  if (viewType == 0) {
     viewRenderFunction = (tile)=>{
       let phenotypicColor = rgbStringToObj(tile.data.phenotypicColor);
 
       gbModBrightness = 0.5;//(tile.data.genome.inherentNumber % 50 / 100);
       // console.log(gbModBrightness);
-      let generationalBrightnessModifier = Math.min(tile.data.generation / 100 + gbModBrightness,2.2); // brighter the younger it is
+      let roundedGeneration = Math.floor(tile.data.generation / 10) * 10 + negativeCycleNumber(tile.data.generation,3);
+      let trueGeneration = tile.data.generation;
+      let throbSpeed = 15 * (1 + (tile.data.genome.inherentNumber % 3));
+      let perceivedGeneration = roundedGeneration + (Math.pow((trueGeneration - roundedGeneration)/3,2) * (cycleNumber(time,throbSpeed)/throbSpeed));
+      let generationalBrightnessModifier = Math.min(perceivedGeneration / 100 + gbModBrightness,2.2); // brighter the younger it is
       if (tile.data.genome.inherentNumber % 2) generationalBrightnessModifier = 1 / generationalBrightnessModifier - gbModBrightness;
 
       let battleModifier = (tile.data.bloodiness / 10) + 1; // more bloodiness, redder, darker
       let accentModifier = Math.pow(phenotypicColor[tile.data.genome.accentColor] / 255 * 2,5) * 4 - 10;
+      let borderModifier = tile.friendlyAdjacents.length / 16 + 0.5;
       let throbbingColor = {
-        r:phenotypicColor.r * generationalBrightnessModifier * battleModifier + accentModifier,
-        g:phenotypicColor.g * generationalBrightnessModifier / battleModifier + accentModifier,
-        b:phenotypicColor.b * generationalBrightnessModifier / battleModifier + accentModifier,
+        r:(phenotypicColor.r * generationalBrightnessModifier * battleModifier + accentModifier) * borderModifier,
+        g:(phenotypicColor.g * generationalBrightnessModifier / battleModifier + accentModifier) * borderModifier,
+        b:(phenotypicColor.b * generationalBrightnessModifier / battleModifier + accentModifier) * borderModifier,
       }
+      throbbingColor[tile.data.genome.accentColor] *= 1.2;
+      return `rgb(${throbbingColor.r},${throbbingColor.g},${throbbingColor.b})`;
+    }
+  } else if (viewType == 1) {
+    viewRenderFunction = (tile)=>{
+      let phenotypicColor = rgbStringToObj(tile.data.phenotypicColor);
+
+      // console.log(gbModBrightness);
+      let generationalBrightnessModifier = Math.min(cycleNumber(tile.data.generation,(20 + ((tile.data.genome.inherentNumber % 5) * 20))) / 100 + 0.5,2.2); // brighter the later generation is
+      if (tile.data.genome.inherentNumber % 2) generationalBrightnessModifier = 1 / generationalBrightnessModifier - 0.5;
+      else generationalBrightnessModifier += 0.3;
+
+      let battleModifier = (tile.data.bloodiness / 10) + 1; // more bloodiness, redder, darker
+      let accentModifier = Math.pow(phenotypicColor[tile.data.genome.accentColor] / 255 * 2,5) * 4 - 10;
+      let borderModifier = tile.friendlyAdjacents.length / 16 + 0.5;
+      let throbbingColor = {
+        r:(phenotypicColor.r * generationalBrightnessModifier * battleModifier + accentModifier) * borderModifier,
+        g:(phenotypicColor.g * generationalBrightnessModifier / battleModifier + accentModifier) * borderModifier,
+        b:(phenotypicColor.b * generationalBrightnessModifier / battleModifier + accentModifier) * borderModifier,
+      }
+      throbbingColor[tile.data.genome.accentColor] *= 1.2;
       return `rgb(${throbbingColor.r},${throbbingColor.g},${throbbingColor.b})`;
     }
   } else if (viewType == 2) {
     viewRenderFunction = (tile)=>{
       let phenotypicColor = rgbStringToObj(tile.data.phenotypicColor);
+
+      let nutritionFactor = (tile.nutrition / fullNutritionLevel);
+
       let decimalNutritionLevel = Math.log10(tile.nutrition);
       if (decimalNutritionLevel >= 0) decimalNutritionLevel = 0;
       else decimalNutritionLevel = Math.abs(decimalNutritionLevel);
+
       let nutritionalColor = {
-        r:(tile.nutrition / fullNutritionLevel) * 10,
-        g:phenotypicColor.g * 0.3,
-        b:(phenotypicColor.b) * decimalNutritionLevel
+        r:nutritionFactor * 10,
+        g:tile.virusIsProductive() * 50 + 10 + nutritionFactor,
+        b:(phenotypicColor.b) * decimalNutritionLevel + nutritionFactor/10 + (tile.virusIsProductive() * 20)
       }
       return `rgb(${nutritionalColor.r},${nutritionalColor.g},${nutritionalColor.b})`;
     }
@@ -422,9 +520,9 @@ function setViewType(index) {
     viewRenderFunction = (tile)=>{
       let baseColor = rgbStringToObj(tile.trueColor);
       let generationalColor = {
-        r:tile.data.generation * 2.0 + 30 + (baseColor.r * 0.05),
-        g:tile.data.generation * 1.0 + 30 + (baseColor.g * 0.05),
-        b:tile.data.generation * 1.5 + 30 + (baseColor.b * 0.05),
+        r:cycleNumber(tile.data.generation,37) * 0.5 + 30 + (baseColor.r * 0.05),
+        g:cycleNumber(tile.data.generation,107) * 2.5 + 30 + (baseColor.g * 0.05),
+        b:cycleNumber(tile.data.generation,173) * 1.5 + 30 + (baseColor.b * 0.05),
       }
       return `rgb(${generationalColor.r},${generationalColor.g},${generationalColor.b})`;
     }
@@ -436,7 +534,7 @@ function setViewType(index) {
         g:Math.pow(baseColor.g / 255 * 2,5) * 100,
         b:Math.pow(baseColor.b / 255 * 2,5) * 100,
       }
-      extremifiedColor[tile.data.genome.accentColor] *= 2;
+      extremifiedColor[["r","g","b"][tile.data.genome.inherentNumber % 4]] *= 2;
       return `rgb(${extremifiedColor.r},${extremifiedColor.g},${extremifiedColor.b})`;
       }
   }
@@ -450,30 +548,34 @@ function onload() {
   screenY = Math.round(innerHeight / tilePx);
 
   initCanvas(canvas);
-  initWorld();
+  requestAnimationFrame(initWorld);
   setViewType(1);
 }
 function initCanvas(elem) {
   elem.width = screenX;
   elem.height = screenY;
-  setPixel(1,1,"rgb(255,0,0)");
 }
 function initWorld() {
-  setInterval(function(){
+  resetCanvas();
+  renderCanvas();
+  if (time % 5 == 0 || paused) updateHover(currentMouseTile.x,currentMouseTile.y);
+
+  if (!paused) {
     time++;
-    timestep();
-    if (time % 5 == 0) updateHover(currentMouseTile.x,currentMouseTile.y);
-  },15);
+    updateViruses();
+  }
+
+  requestAnimationFrame(initWorld);
 }
 //general
 function updateHover(x,y) {
   let tile = Tile.get(x,y);
 
   if (tile) {
-    document.getElementById("TileType").innerHTML = `Type: ${tile.type}`;
     if (tile.type == "virus") {
       document.getElementById("TileColonyName").innerHTML = `${tile.name}`;
       document.getElementById("TileNutrition").innerHTML = `Nutrition: ${tile.nutrition.toFixed(5)}`;
+      document.getElementById("TileSedentaryDesire").innerHTML = `Sedentary Desire: ${tile.data.sedentaryDesire.toFixed(1)}`;
       document.getElementById("TileKills").innerHTML = `Bloodiness: ${tile.data.bloodiness.toFixed(1)}`;
       document.getElementById("TileColonyGeneration").innerHTML = `Colony Generation: ${tile.data.generation}`;
       document.getElementById("TileColonyColor").innerHTML = `Colony Color: ${tile.trueColor}`;
@@ -481,20 +583,20 @@ function updateHover(x,y) {
       document.getElementById("TileColonyInherentNumber").innerHTML = `Colony Inherent Number: ${tile.data.genome.inherentNumber}`;
       document.getElementById("TileColonyAccentColor").innerHTML = `Colony Accent: ${tile.data.genome.accentColor}`;
       
-      let generationalBrightnessModifier = Math.min(tile.data.generation / 100 + 0.5,2.2); // brighter the younger it is
-      if (tile.data.genome.inherentNumber % 2) generationalBrightnessModifier = 1 / generationalBrightnessModifier - 0.5;
-      document.getElementById("GenerationalBrightnessModifier").innerHTML = `DEBUG GBMod: ${generationalBrightnessModifier}`;
+      // let generationalBrightnessModifier = Math.min(tile.data.generation / 100 + 0.5,2.2); // brighter the younger it is
+      // if (tile.data.genome.inherentNumber % 2) generationalBrightnessModifier = 1 / generationalBrightnessModifier - 0.5;
+      // document.getElementById("GenerationalBrightnessModifier").innerHTML = `DEBUG GBMod: ${generationalBrightnessModifier}`;
+    } else {
+      Array.from(document.getElementById("TileInfo").children).forEach((child)=>{
+        child.innerHTML = "";
+      });
     }
+    document.getElementById("TileType").innerHTML = `Type: ${tile.type}`;
   }
 }
 function setPixel(x,y,color) {
   ctx.fillStyle = color;
   ctx.fillRect(x,y,1,1);
-}
-function timestep() {
-  updateViruses();
-  resetCanvas();
-  renderCanvas();
 }
 function resetCanvas() {
   ctx.clearRect(0, 0, screenX, screenY);
@@ -514,19 +616,50 @@ function updateViruses() {
   for (const [y, row] of Object.entries(Tile.tileRows)) {
     for (const [x, tile] of Object.entries(row)) {
       if (tile.type == "virus") {
+
+        //death
+        // if (chance((time/30 - tile.data.generation)*50)) {
+        //   tile.data.generation += negativeCycleNumber(time,10); // wobble the generation
+        // }
+
         let explode = false;
         let diffusionReceivers = tile.friendlyAdjacents.length;
-        let nutritionDeficit = Math.min((tile.nutrition / fullNutritionLevel),1);
+        let nutritionBonus = Math.min((tile.nutrition / fullNutritionLevel),1);
         // let friendlyAdjacents = tile.friendlyAdjacents.length;
         // let adjacencyDebuff = (Math.pow(friendlyAdjacents * tile.data.genome.adjacencyDebuffStrength + 1,2));
+        
+        tile.data.sedentaryDesire += 0.01;
+        tile.data.nutrition *= nutritionDecayMultiplier;
+        tile.data.bloodiness = Math.max(0,tile.data.bloodiness*0.98);
 
-        tile.data.bloodiness = Math.max(0,tile.data.bloodiness - 0.05);
         var adjs = tile.adjacentCoords;
+        // adjs = [randElem(adjs)];
+
+        if (chance(baseProductionChance * tile.virusIsProductive())) {
+          // PRODUCTIVE CASE - Get most nutrition from neighbors and multiply
+          let collectedNutrition = 0;
+          tile.friendlyAdjacents.forEach((friend)=>{
+            collectedNutrition += friend.nutrition * 0.9;
+            friend.nutrition *= 0.1;
+          });
+          tile.nutrition += collectedNutrition;
+          tile.nutrition *= 1.5;
+          tile.nutrition += productionNutrition;
+        }
+
+
         adjs.forEach((coord)=>{
+          let canInfect = tile.virusCanInfect(coord.x,coord.y);
           let otherTile = Tile.get(coord.x,coord.y);
-          if (tile.virusEdible(coord.x,coord.y)) {
-            // EATING CASE (not happening for now)
-            Tile.set(new Tile("virus",Tile.generateVirusData(++tile.data.generation,tile.trueColor,tile.data.genome.accentColor,tile.data.genome.inherentNumber,tile.data.genome.disposition,100)),coord.x,coord.y);
+
+          if (otherTile == "wall") {
+            return;
+          }
+
+          if (tile.virusEdible(coord.x,coord.y) && chance(baseEatingChance)) {
+            // EATING CASE
+            let nutrition = otherTile.type == "food" ? foodNutrition : greatfoodNutrition;
+            Tile.set(new Tile("virus",Tile.generateVirusData(++tile.data.generation + tile.data.genome.inherentNumber % 3,tile.trueColor,tile.data.genome.accentColor,tile.data.genome.inherentNumber,tile.data.genome.disposition,nutrition)),coord.x,coord.y);
           } else if (tile.virusSame(coord.x,coord.y) && chance(baseDiffusionChance / diffusionReceivers)) {
             // DIFFUSION CASE
             if (chance(baseDiffusionChance / 10)) {
@@ -537,18 +670,17 @@ function updateViruses() {
               otherTile.nutrition += tile.nutrition / (diffusionReceivers + 1);
               tile.nutrition = tile.nutrition / (diffusionReceivers + 1) * (diffusionReceivers);
             }
-          } else if (false) {
-          } else if (tile.virusCanInfect(coord.x,coord.y) && !otherTile && chance(baseSpreadChance * nutritionDeficit)) {
+          } else if (canInfect && !otherTile && chance(baseSpreadChance * nutritionBonus / tile.data.sedentaryDesire)) {
             // SPREAD TO AIR CASE
-            Tile.set(new Tile("virus",Tile.generateVirusData(++tile.data.generation,tile.trueColor,tile.data.genome.accentColor,tile.data.genome.inherentNumber,tile.data.genome.disposition,tile.nutrition * 0.99)),coord.x,coord.y);
+            Tile.set(new Tile("virus",Tile.generateVirusData(++tile.data.generation + tile.data.genome.inherentNumber % 3,tile.trueColor,tile.data.genome.accentColor,tile.data.genome.inherentNumber,tile.data.genome.disposition,tile.nutrition * 0.99)),coord.x,coord.y);
             tile.nutrition = tile.nutrition * 0.01;
-          } else if (tile.virusCanInfect(coord.x,coord.y) && Tile.get(coord.x,coord.y)) {
+          } else if (canInfect && Tile.get(coord.x,coord.y)) {
             // ATTACK CASE - If there is another tile, and it is a virus, attempt to attack
-            if (chance(baseAttackChance * nutritionDeficit) && otherTile.type == "virus") {
+            if (chance(baseAttackChance * Math.pow(nutritionBonus,2)) && otherTile.type == "virus") {
               // SUCCESSFUL ATTACK CASE
-              explode = chance(baseExplosionChance);
+              explode = chance(baseExplosionChance * tile.data.bloodiness);
               let bloodiness = otherTile.data.bloodiness + 1;
-              Tile.set(new Tile("virus",Tile.generateVirusData(++tile.data.generation,tile.trueColor,tile.data.genome.accentColor,tile.data.genome.inherentNumber,tile.data.genome.disposition,tile.nutrition * 0.99,bloodiness)),coord.x,coord.y);
+              Tile.set(new Tile("virus",Tile.generateVirusData(++tile.data.generation + tile.data.genome.inherentNumber % 3,tile.trueColor,tile.data.genome.accentColor,tile.data.genome.inherentNumber,tile.data.genome.disposition,tile.nutrition * 0.99,bloodiness)),coord.x,coord.y);
               tile.nutrition = tile.nutrition * 0.01;
             }
           } else if (chance(baseMutationChance / Math.max(tile.nutrition,1))) {
@@ -580,9 +712,6 @@ function updateViruses() {
       }
     }
   }
-  //spread
-    //chance to not work
-    //chance to mutate
 }
 
 function rgbStringToObj(string) {
@@ -640,7 +769,13 @@ function getRGBDistance(a,b) {
 function randElem(arr) {
   return arr[randInt(arr.length)];
 }
+function negativeCycleNumber(index, cycleSize = 8) {
+  let raw = (index % (cycleSize*2)) - cycleSize;
+  raw = raw < 0 ? raw : raw + 1;
+  return raw;
+}
 function cycleNumber(index, cycleSize = 8) {
+  index += 8;
   let raw = (index % (cycleSize*2)) - cycleSize;
   raw = raw < 0 ? raw : raw + 1;
   raw = Math.abs(raw);
@@ -653,4 +788,15 @@ function shuffleArray(unshuffled) {
     .sort((a, b) => a.sort - b.sort)
     .map(({ value }) => value)
   return shuffled;
+}
+function debugCountTiles() {
+  var count = 0;
+
+  Object.values(Tile.tileRows).forEach((row)=>{
+    Object.values(row).forEach((tile)=>{
+      count++;
+    })
+  });
+
+  console.log(count);
 }
